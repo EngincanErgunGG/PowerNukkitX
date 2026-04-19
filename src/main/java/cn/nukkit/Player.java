@@ -222,7 +222,6 @@ public class Player extends EntityHuman implements CommandSender, ChunkLoader, I
     /**
      * Whether to remove the color character in the chat of the changed player as §c §1
      */
-    protected boolean removeFormat = true;
     protected String displayName;
     protected static final int RESOURCE_PACK_CHUNK_SIZE = 8 * 1024; // 8KB
     protected Vector3 sleeping = null;
@@ -1744,25 +1743,12 @@ public class Player extends EntityHuman implements CommandSender, ChunkLoader, I
     }
 
     /**
-     * Retrieves {@link #removeFormat}
+     * Checks if the player has permission to use text colors in chat and signs.
      *
-     * @return boolean
+     * @return True if the player has the "nukkit.textcolor" permission, false otherwise.
      */
-    public boolean getRemoveFormat() {
-        return removeFormat;
-    }
-
-    /**
-     * Set {@link #removeFormat} to the specified value
-     *
-     * @param remove Whether remove the formatting character
-     */
-    public void setRemoveFormat(boolean remove) {
-        this.removeFormat = remove;
-    }
-
-    public void setRemoveFormat() {
-        this.setRemoveFormat(true);
+    public boolean canUseTextColor() {
+        return this.hasPermission("nukkit.textcolor");
     }
 
     /**
@@ -2193,14 +2179,15 @@ public class Player extends EntityHuman implements CommandSender, ChunkLoader, I
         level = level == null ? this.level : level;
         long index = Level.chunkHash(x, z);
         if (level.unregisterChunkLoader(this, x, z, false)) {
-            if (playerChunkManager.getUsedChunks().contains(index)) {
+            boolean wasTracked;
+            synchronized (playerChunkManager) {
+                wasTracked = playerChunkManager.getUsedChunks().remove(index);
+            }
+            if (wasTracked) {
                 for (Entity entity : level.getChunkEntities(x, z).values()) {
                     if (entity != this) {
                         entity.despawnFrom(this);
                     }
-                }
-                synchronized (playerChunkManager.getUsedChunks()) {
-                    playerChunkManager.getUsedChunks().remove(index);
                 }
             }
         }
@@ -2247,7 +2234,7 @@ public class Player extends EntityHuman implements CommandSender, ChunkLoader, I
         }
 
         this.chunkLoadCount++;
-        synchronized (playerChunkManager.getUsedChunks()) {
+        synchronized (playerChunkManager) {
             this.playerChunkManager.getUsedChunks().add(Level.chunkHash(x, z));
         }
         this.dataPacket(packet);
@@ -2931,7 +2918,7 @@ public class Player extends EntityHuman implements CommandSender, ChunkLoader, I
 
         this.resetInventory();
 
-        if (this.removeFormat) {
+        if (!this.canUseTextColor()) {
             message = TextFormat.clean(message, true);
         }
 
@@ -3488,28 +3475,30 @@ public class Player extends EntityHuman implements CommandSender, ChunkLoader, I
         this.session.close(null);
     }
 
-    public synchronized void unloadAllUsedChunk() {
-        //save player data
-        //unload chunk for the player
-        LongIterator iterator = this.playerChunkManager.getUsedChunks().iterator();
-        try {
-            while (iterator.hasNext()) {
-                long l = iterator.nextLong();
-                int chunkX = Level.getHashX(l);
-                int chunkZ = Level.getHashZ(l);
-                if (level.unregisterChunkLoader(this, chunkX, chunkZ, false)) {
-                    for (Entity entity : level.getChunkEntities(chunkX, chunkZ).values()) {
-                        if (entity != this) {
-                            entity.despawnFrom(this);
+    public void unloadAllUsedChunk() {
+        synchronized (playerChunkManager) {
+            //save player data
+            //unload chunk for the player
+            LongIterator iterator = this.playerChunkManager.getUsedChunks().iterator();
+            try {
+                while (iterator.hasNext()) {
+                    long l = iterator.nextLong();
+                    int chunkX = Level.getHashX(l);
+                    int chunkZ = Level.getHashZ(l);
+                    if (level.unregisterChunkLoader(this, chunkX, chunkZ, false)) {
+                        for (Entity entity : level.getChunkEntities(chunkX, chunkZ).values()) {
+                            if (entity != this) {
+                                entity.despawnFrom(this);
+                            }
                         }
+                        iterator.remove();
                     }
-                    iterator.remove();
                 }
+            } catch (Exception e) {
+                getServer().getLogger().error("Failed to unload all used chunks.", e);
+            } finally {
+                this.playerChunkManager.getUsedChunks().clear();
             }
-        } catch (Exception e) {
-            getServer().getLogger().error("Failed to unload all used chunks.", e);
-        } finally {
-            this.playerChunkManager.getUsedChunks().clear();
         }
     }
 
@@ -4797,13 +4786,20 @@ public class Player extends EntityHuman implements CommandSender, ChunkLoader, I
             spawnPosition.dimension = spawn.getLevel().getDimension();
             this.dataPacket(spawnPosition);
 
-            // Remove old chunks
-            for (long index : new ArrayList<>(playerChunkManager.getUsedChunks())) {
+            // Remove old chunks; snapshot under lock so tick() can't mutate sentChunks
+            // while we iterate, then clear any residual entries afterward.
+            long[] oldChunks;
+            synchronized (playerChunkManager) {
+                oldChunks = playerChunkManager.getUsedChunks().toLongArray();
+            }
+            for (long index : oldChunks) {
                 int chunkX = Level.getHashX(index);
                 int chunkZ = Level.getHashZ(index);
                 this.unloadChunk(chunkX, chunkZ, oldLevel);
             }
-            playerChunkManager.getUsedChunks().clear();
+            synchronized (playerChunkManager) {
+                playerChunkManager.getUsedChunks().clear();
+            }
 
             SetTimePacket setTime = new SetTimePacket();
             setTime.time = level.getTime();

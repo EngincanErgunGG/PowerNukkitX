@@ -265,6 +265,18 @@ public class Level implements Metadatable {
         randomTickBlocks.add(BlockID.LIGHTNING_ROD);
         randomTickBlocks.add(BlockID.EXPOSED_LIGHTNING_ROD);
         randomTickBlocks.add(BlockID.WEATHERED_LIGHTNING_ROD);
+        randomTickBlocks.add(BlockID.COPPER_BULB);
+        randomTickBlocks.add(BlockID.EXPOSED_COPPER_BULB);
+        randomTickBlocks.add(BlockID.WEATHERED_COPPER_BULB);
+        randomTickBlocks.add(BlockID.COPPER_DOOR);
+        randomTickBlocks.add(BlockID.EXPOSED_COPPER_DOOR);
+        randomTickBlocks.add(BlockID.WEATHERED_COPPER_DOOR);
+        randomTickBlocks.add(BlockID.COPPER_TRAPDOOR);
+        randomTickBlocks.add(BlockID.EXPOSED_COPPER_TRAPDOOR);
+        randomTickBlocks.add(BlockID.WEATHERED_COPPER_TRAPDOOR);
+        randomTickBlocks.add(BlockID.CHISELED_COPPER);
+        randomTickBlocks.add(BlockID.EXPOSED_CHISELED_COPPER);
+        randomTickBlocks.add(BlockID.WEATHERED_CHISELED_COPPER);
         randomTickBlocks.add(BlockID.BUDDING_AMETHYST);
         randomTickBlocks.add(BlockID.POINTED_DRIPSTONE);
         randomTickBlocks.add(BlockID.CAVE_VINES);
@@ -975,7 +987,7 @@ public class Level implements Metadatable {
         if (this.chunkLoaders.containsKey(index)) {
             return this.chunkLoaders.get(index).entrySet()
                     .stream()
-                    .filter(e -> (e.getValue() instanceof Player p && p.getPlayerChunkManager().getUsedChunks().contains(index)))
+                    .filter(e -> (e.getValue() instanceof Player p && p.getPlayerChunkManager().isSentChunk(index)))
                     .collect(HashMap::new, (m, e) -> {
                         m.put(e.getKey(), (Player) e.getValue());
                     }, HashMap::putAll);
@@ -3996,7 +4008,7 @@ public class Level implements Metadatable {
 
     private void sendChunk(int x, int z, long index, DataPacket packet) {
         for (Player player : this.chunkSendQueue.get(index).values()) {
-            if (player.isConnected() && player.getUsedChunks().contains(index)) {
+            if (player.isConnected() && player.getPlayerChunkManager().isSentChunk(index)) {
                 player.sendChunk(x, z, packet);
             }
         }
